@@ -1,0 +1,215 @@
+---
+title: "INSIGHT - COVID-19 Analysis"
+author: "Horacio Chacon"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE)
+library(data.table)
+library(magrittr)
+library(janitor)
+library(lubridate)
+library(kableExtra)
+library(AMR)
+options(na.rm = TRUE)
+
+# Functions definition ----------------------------------------------------
+
+missing_field <-  function(x) {
+  list(miss = sum(is.na(x), na.rm = T), 
+       miss_perc = (sum(is.na(x), na.rm = T) / length(x)))
+} 
+
+miss <- function(x) {
+  is.na(max(x))
+}
+
+# Reading the data --------------------------------------------------------
+
+na_string <- c(NA_character_, "", "NULL")
+
+molecular <- fread(
+  "data/pm21Septiembre2021.csv",
+  na.strings = na_string
+  ) %>% clean_names()
+
+positives <- fread(
+  "data/positivos_covid.csv", 
+  na.strings = na_string
+  ) %>% clean_names()
+
+deaths <- fread(
+  "data/fallecidos_covid.csv", 
+  na.strings = na_string
+  ) %>% clean_names()
+
+suspected <- fread(
+  "data/TB_F00_SICOVID.csv", 
+  na.strings = na_string
+  ) %>% clean_names() 
+
+hospital  <- fread("data/TB_HOSP_VAC_FALLECIDOS.csv", na.strings = na_string)
+attention <- fread("data/TB_ATEN_COVID19.csv", na.strings = na_string)
+
+# Formatting the datasets --------------------------------------------------
+
+molecular[
+  , ':='(fecha_corte = ymd(fecha_corte),
+         fecha_muestra = ymd(fecha_muestra),
+         age_group = age_groups(edad),
+         missing = apply(.SD, 1, miss)
+  )
+]
+
+positives[edad != -79
+  , ':='(fecha_corte = ymd(fecha_corte),
+         fecha_resultado = ymd(fecha_resultado),
+         age_group = age_groups(edad, na.rm = TRUE),
+         missing = apply(.SD, 1, miss))
+]
+
+suspected[
+  , ':='(fecha_contacto = dmy(fecha_contacto),
+         fecha_sintomas = dmy(fecha_sintomas),
+         missing = apply(.SD, 1, miss))
+]
+
+deaths[
+  , ':='(fecha_corte = ymd(fecha_corte),
+         fecha_fallecimiento = ymd(fecha_fallecimiento),
+         age_group = age_groups(edad_declarada),
+         missing = apply(.SD, 1, miss))
+]
+
+hospital[
+  , c("fecha_dosis1", "fecha_dosis2", "fecha_dosis3",
+      "fecha_ingreso_hosp", "fecha_ingreso_uci", "fecha_ingreso_ucin",
+      "fecha_segumiento_hosp_ultimo") := lapply(.SD, dmy),
+  .SDcols = c("fecha_dosis1", "fecha_dosis2", "fecha_dosis3",
+              "fecha_ingreso_hosp", "fecha_ingreso_uci", "fecha_ingreso_ucin",
+              "fecha_segumiento_hosp_ultimo")
+][
+  , missing := apply(.SD, 1, miss)
+]
+
+attention[
+  , c("fecha_alta", "fecha_alta_voluntaria", "fecha_fallecido",
+      "fecha_referido") := lapply(.SD, dmy),
+  .SDcols = c("fecha_alta", "fecha_alta_voluntaria", "fecha_fallecido",
+              "fecha_referido")
+][
+  , missing := apply(.SD, 1, miss)
+]
+
+```
+
+## Completeness Indicators
+
+### Molecular tests
+
+#### 1a - Proportion cases missing
+
+```{r}
+molecular[
+  ,.(missing = sum(missing), .N, perc_miss = sum(missing)/.N), 
+  by = sexo
+][order(-perc_miss)] %>% 
+  kbl(caption = "By sex") %>% 
+  kable_styling()
+
+molecular[
+  ,.(missing = sum(missing), .N, perc_miss = sum(missing)/.N), 
+  by = age_group
+][order(-perc_miss)] %>% 
+  kbl(caption = "By age group") %>% 
+  kable_styling()
+
+molecular[
+  ,.(missing = sum(missing), .N, perc_miss = sum(missing)/.N), 
+  by = departamento_paciente
+][order(-perc_miss)] %>% 
+  kbl(caption = "By patient department") %>% 
+  kable_styling()
+
+molecular[
+  ,.(missing = sum(missing), .N, perc_miss = sum(missing)/.N), 
+  by = departamento_muestra
+][order(-perc_miss)] %>% 
+  kbl(caption = "By sample department") %>% 
+  kable_styling()
+
+molecular[
+  ,.(missing = sum(missing), .N, perc_miss = sum(missing)/.N), 
+  by = institucion
+][order(-perc_miss)] %>% 
+  kbl(caption = "By institution") %>% 
+  kable_styling()
+
+molecular[
+  ,.(missing = sum(missing), .N, perc_miss = sum(missing)/.N), 
+  by = .(year(fecha_muestra), month(fecha_muestra))
+][order(-year, -month)] %>% 
+  kbl(caption = "By year and month") %>% 
+  kable_styling()
+```
+
+### 1b - Proportion missing by field
+
+```{r}
+molecular[
+  , unlist(lapply(.SD, missing_field)),
+  .SDcols = !c("missing", "age_group")
+] %>% 
+  kbl(caption = "Overall") %>% 
+  kable_styling()
+
+molecular[
+  , c(unlist(lapply(.SD, missing_field), recursive = FALSE), list(n = .N)),
+  .SDcols = !c("missing", "age_group"),
+  by = sexo
+] %>% 
+  kbl(caption = "By sex ") %>% 
+  kable_styling()
+
+molecular[
+  , c(unlist(lapply(.SD, missing_field), recursive = FALSE), list(n = .N)),
+  .SDcols = !c("missing", "age_group"),
+  by = age_group
+] %>% 
+  kbl(caption = "By age group") %>% 
+  kable_styling()
+
+molecular[
+  , c(unlist(lapply(.SD, missing_field), recursive = FALSE), list(n = .N)),
+  .SDcols = !c("missing", "age_group"),
+  by = departamento_paciente
+] %>% 
+  kbl(caption = "By patient department") %>% 
+  kable_styling()
+
+molecular[
+  , c(unlist(lapply(.SD, missing_field), recursive = FALSE), list(n = .N)),
+  .SDcols = !c("missing", "age_group"),
+  by = departamento_muestra
+] %>% 
+  kbl(caption = "By sample department") %>% 
+  kable_styling()
+
+molecular[
+  , c(unlist(lapply(.SD, missing_field), recursive = FALSE), list(n = .N)),
+  .SDcols = !c("missing", "age_group"),
+  by = institucion
+] %>% 
+  kbl(caption = "By institution") %>% 
+  kable_styling()
+
+molecular[
+  , c(unlist(lapply(.SD, missing_field), recursive = FALSE), list(n = .N)),
+  .SDcols = !c("missing", "age_group"),
+  by = .(year(fecha_muestra), month(fecha_muestra))
+][order(-year, -month)] %>% 
+  kbl(caption = "By year and month") %>% 
+  kable_styling()
+```

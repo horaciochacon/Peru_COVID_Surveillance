@@ -1,0 +1,1213 @@
+---
+title: "COVID-19 surveillance secondary data source analysis"
+author: "Horacio Chacon Torrico"
+format: html
+execute: 
+  echo: false
+  warning: false
+  
+editor: visual
+fig-cap-location: top
+---
+
+```{r}
+library(data.table)
+library(tidyverse)
+library(sf)
+library(scales)
+library(lubridate)
+library(cowplot)
+library(AMR)
+library(viridis)
+library(pander)
+```
+
+```{r}
+#| cache: true
+# Functions definition ----------------------------------------------------
+
+missing_field <-  function(x) {
+  list(miss = sum(is.na(x), na.rm = T), 
+       miss_perc = (sum(is.na(x), na.rm = T) / length(x)))
+} 
+
+miss <- function(x) {
+  is.na(max(x))
+}
+
+# Reading data ------------------------------------------------------------
+
+molecular <- fread("data/processed/molecular.gz")
+positives <- fread("data/processed/positives.gz")
+suspected <- fread("data/processed/suspected.gz")
+deaths    <- fread("data/processed/deaths.gz")
+hospital  <- fread("data/processed/hospital.gz")
+attention <- fread("data/processed/attention.gz")
+
+peru_dep  <- read_sf("data/departamentos/DEPARTAMENTOS.shp")   
+peru_prov <- read_sf("data/provincias/PROVINCIAS.shp")
+
+```
+
+# Attribute 1. Completeness
+
+## Indicator 1a
+
++---------+---------------------------------------------------------------------------------+----------------------------------------------------------------------------+-----------------+-------------+
+| **\#**  | **Indicator definition**                                                        | **Numerator and denominator**                                              | **Data source** | **Levels**  |
++=========+=================================================================================+============================================================================+=================+=============+
+| 1a      | Proportion of cases recorded in a database with no missing required information | **Numerator:** total cases recorded with no missing information            | \- PCR          | \- Year     |
+|         |                                                                                 |                                                                            |                 |             |
+|         |                                                                                 | **Denominator:** total cases recorded, including unknown and missing items | \- Positives    | \- Sex      |
+|         |                                                                                 |                                                                            |                 |             |
+|         |                                                                                 |                                                                            | \- Deaths       | \- Region   |
+|         |                                                                                 |                                                                            |                 |             |
+|         |                                                                                 |                                                                            |                 | \- Province |
++---------+---------------------------------------------------------------------------------+----------------------------------------------------------------------------+-----------------+-------------+
+
+: {tbl-colwidths="\[5,30,30, 17.5, 17.5\]"}
+
+### Molecular (PCR tests) dataset
+
+#### Tables
+
+```{r}
+# by year
+molecular[
+  ,.(
+    no_miss = .N - sum(missing), 
+    perc_no_miss = (.N - sum(missing))/.N,
+    missing = sum(missing),
+    perc_miss = sum(missing)/.N,
+    .N 
+    ), 
+  by = year(week)
+] %>% 
+  as_tibble() %>% 
+  filter(year %in% c(2020, 2021, 2022)) %>% 
+  select(
+    Year = year,
+    `No Missing` = no_miss,
+    `%` = perc_no_miss,
+    Total = N
+    ) %>% 
+  mutate(
+    Year = as.character(Year),
+    `%` = paste0(round(`%` * 100, 1), " (%)")
+  ) %>% 
+  pander(
+    caption = "Completeness (1a) by year - PCR dataset",
+    justify = c('left', 'right', 'right', 'right'),
+    big.mark = ','
+    )
+
+
+# by region
+molecular[
+  ,.(
+    no_miss = .N - sum(missing), 
+    perc_no_miss = (.N - sum(missing))/.N,
+    missing = sum(missing),
+    perc_miss = sum(missing)/.N,
+    .N 
+    ), 
+  by = departamento_muestra
+][order(departamento_muestra)] %>% 
+  as_tibble() %>% 
+  select(
+    Region = departamento_muestra,
+    `No Missing` = no_miss,
+    `%` = perc_no_miss,
+    Total = N
+    ) %>% 
+  mutate(
+    Region = str_to_title(Region),
+    `%` = paste0(round(`%` * 100, 1), " (%)")
+  ) %>% 
+  pander(
+    caption = "Completeness (1a) by Region - PCR dataset",
+    justify = c('left', 'right', 'right', 'right'),
+    big.mark = ','
+    )
+
+# by sex
+molecular[
+  ,.(
+    no_miss = .N - sum(missing), 
+    perc_no_miss = (.N - sum(missing))/.N,
+    missing = sum(missing),
+    perc_miss = sum(missing)/.N,
+    .N 
+    ), 
+  by = sexo
+] %>% 
+  as_tibble() %>% 
+  select(
+    Sex = sexo,
+    `No Missing` = no_miss,
+    `%` = perc_no_miss,
+    Total = N
+    ) %>% 
+  mutate(
+    Sex = str_to_title(Sex),
+    `%` = paste0(round(`%` * 100, 1), " (%)")
+  ) %>% 
+  pander(
+    caption = "Completeness (1a) by sex - PCR dataset",
+    justify = c('left', 'right', 'right', 'right'),
+    big.mark = ','
+    )
+
+```
+
+#### Plots & Maps
+
+```{r}
+#| fig-cap: 
+#| - "Indicator 1a - weekly (PCR dataset)"
+#| - "Indicator 1a - weekly by sex (PCR dataset)"
+#| fig-width: 3
+
+# Time series
+ts <- molecular[
+  ,.(no_miss = .N - sum(missing), 
+    perc_no_miss = (.N - sum(missing))/.N,
+     perc_miss = sum(missing)/.N),
+  by = week
+]
+
+ts %>% 
+  filter(week >= "2020-03-01") %>% 
+  ggplot(aes(x = week)) + 
+  geom_line(aes(y = perc_no_miss)) +
+  labs(
+    y = "Percentage of no missing",
+    x = "Date") +
+  scale_y_continuous(labels = scales::percent) +
+  theme_bw() 
+
+# Time series by sex
+ts_by <- molecular[
+  ,.(no_miss = .N - sum(missing), 
+    perc_no_miss = (.N - sum(missing))/.N,
+     perc_miss = sum(missing)/.N),
+  by = .(week, sexo)
+]
+
+ts_by %>% 
+  filter(week >= "2020-03-01") %>% 
+  ggplot(aes(x = week, col = sexo)) + 
+  geom_line(aes(y = perc_no_miss)) +
+  labs(
+    y = "Percentage of no missing",
+    x = "Date") +
+  scale_y_continuous(labels = scales::percent) +
+  theme_bw() +
+  theme(legend.position = "bottom") 
+```
+
+```{r}
+#| fig-cap: 
+#| - "Map of Indicator 1a at region level - (PCR dataset)"
+#| - "Map of Indicator 1a at province level - (PCR dataset)"
+
+
+# Maps
+
+departments <- molecular[
+  ,.(no_miss = .N - sum(missing), 
+    perc_no_miss = (.N - sum(missing))/.N
+    ),
+  by = departamento_muestra
+]
+
+provinces <- molecular[
+  ,.(no_miss = .N - sum(missing), 
+    perc_no_miss = (.N - sum(missing))/.N
+    ),
+  by = .(departamento_muestra,provincia_muestra)
+]
+
+# Regions
+
+map <- peru_dep %>% 
+  left_join(
+    departments, 
+    by = c("DEPARTAMEN" = "departamento_muestra")
+    )
+
+
+map %>%
+  filter(DEPARTAMEN != "CALLAO") %>% 
+  ggplot() +
+  geom_sf(aes(fill = perc_no_miss), size = 0.05, color = "grey40") +
+  theme_map() +
+  scale_fill_viridis(
+    begin = 0.4,
+    end = 1,
+    labels = scales::percent,
+    option = "mako", 
+    direction = 1,
+    name = paste0("No Missing %"),
+    na.value = "white"
+    )
+
+# Provinces
+
+map <- peru_prov %>% 
+  left_join(
+    provinces, 
+    by = c(
+      "DEPARTAMEN" = "departamento_muestra",
+      "PROVINCIA" = "provincia_muestra"
+      )
+  )
+
+map %>%
+  filter(DEPARTAMEN != "CALLAO") %>% 
+  ggplot() +
+  geom_sf(aes(fill = perc_no_miss), size = 0.05, color = "grey40") +
+  theme_map() +
+  scale_fill_viridis(
+    labels = scales::percent,
+    option = "mako", 
+    direction = 1,
+    name = paste0("No Missing %"),
+    na.value = "white"
+    )
+```
+
+### Positives dataset
+
+#### Tables
+
+```{r}
+# by year
+positives[
+  ,.(
+    no_miss = .N - sum(missing), 
+    perc_no_miss = (.N - sum(missing))/.N,
+    missing = sum(missing),
+    perc_miss = sum(missing)/.N,
+    .N 
+    ), 
+  by = year(week)
+] %>% 
+  as_tibble() %>% 
+  filter(year %in% c(2020, 2021, 2022)) %>% 
+  select(
+    Year = year,
+    `No Missing` = no_miss,
+    `%` = perc_no_miss,
+    Total = N
+    ) %>% 
+  mutate(
+    Year = as.character(Year),
+    `%` = paste0(round(`%` * 100, 1), " (%)")
+  ) %>% 
+  pander(
+    caption = "Completeness (1a) by year - Positives dataset",
+    justify = c('left', 'right', 'right', 'right'),
+    big.mark = ','
+    )
+
+
+# by region
+positives[
+  ,.(
+    no_miss = .N - sum(missing), 
+    perc_no_miss = (.N - sum(missing))/.N,
+    missing = sum(missing),
+    perc_miss = sum(missing)/.N,
+    .N 
+    ), 
+  by = departamento
+][order(departamento)] %>% 
+  as_tibble() %>% 
+  select(
+    Region = departamento,
+    `No Missing` = no_miss,
+    `%` = perc_no_miss,
+    Total = N
+    ) %>% 
+  mutate(
+    Region = str_to_title(Region),
+    `%` = paste0(round(`%` * 100, 1), " (%)")
+  ) %>% 
+  pander(
+    caption = "Completeness (1a) by Region - Positives dataset",
+    justify = c('left', 'right', 'right', 'right'),
+    big.mark = ','
+    )
+
+# by sex
+positives[
+  ,.(
+    no_miss = .N - sum(missing), 
+    perc_no_miss = (.N - sum(missing))/.N,
+    missing = sum(missing),
+    perc_miss = sum(missing)/.N,
+    .N 
+    ), 
+  by = sexo
+] %>% 
+  as_tibble() %>% 
+  filter(sexo != "") %>% 
+  select(
+    Sex = sexo,
+    `No Missing` = no_miss,
+    `%` = perc_no_miss,
+    Total = N
+    ) %>% 
+  mutate(
+    Sex = str_to_title(Sex),
+    `%` = paste0(round(`%` * 100, 1), " (%)")
+  ) %>% 
+  pander(
+    caption = "Completeness (1a) by sex - Positives dataset",
+    justify = c('left', 'right', 'right', 'right'),
+    big.mark = ','
+    )
+
+```
+
+#### Plots & Maps
+
+```{r}
+#| fig-cap: 
+#| - "Indicator 1a - weekly (Positives dataset)"
+#| - "Indicator 1a - weekly by sex (Positives dataset)"
+
+# Time series
+ts <- positives[
+  ,.(no_miss = .N - sum(missing), 
+    perc_no_miss = (.N - sum(missing))/.N,
+     perc_miss = sum(missing)/.N),
+  by = week
+]
+
+ts %>% 
+  filter(week >= "2020-03-01") %>% 
+  ggplot(aes(x = week)) + 
+  geom_line(aes(y = perc_no_miss)) +
+  labs(
+    y = "Percentage of no missing",
+    x = "Date") +
+  scale_y_continuous(labels = scales::percent) +
+  theme_bw() 
+
+# Time series by sex
+ts_by <- positives[
+  ,.(no_miss = .N - sum(missing), 
+    perc_no_miss = (.N - sum(missing))/.N,
+     perc_miss = sum(missing)/.N),
+  by = .(week, sexo)
+]
+
+ts_by %>% 
+  filter(week >= "2020-03-01", sexo != "") %>% 
+  ggplot(aes(x = week, col = sexo)) + 
+  geom_line(aes(y = perc_no_miss)) +
+  labs(
+    y = "Percentage of no missing",
+    x = "Date") +
+  scale_y_continuous(labels = scales::percent) +
+  theme_bw() +
+  theme(legend.position = "bottom") 
+```
+
+```{r}
+#| fig-cap: 
+#| - "Map of Indicator 1a at region level - (Positives dataset)"
+#| - "Map of Indicator 1a at province level - (Positives dataset)"
+
+
+# Maps
+
+departments <- positives[
+  ,.(no_miss = .N - sum(missing), 
+    perc_no_miss = (.N - sum(missing))/.N
+    ),
+  by = departamento
+]
+
+provinces <- positives[
+  ,.(no_miss = .N - sum(missing), 
+    perc_no_miss = (.N - sum(missing))/.N
+    ),
+  by = .(departamento, provincia)
+]
+
+# Regions
+
+map <- peru_dep %>% 
+  left_join(
+    departments, 
+    by = c("DEPARTAMEN" = "departamento")
+    )
+
+
+map %>%
+  filter(DEPARTAMEN != "CALLAO") %>% 
+  ggplot() +
+  geom_sf(aes(fill = perc_no_miss), size = 0.05, color = "grey40") +
+  theme_map() +
+  scale_fill_viridis(
+    labels = scales::percent,
+    option = "mako", 
+    direction = 1,
+    name = paste0("No Missing %"),
+    na.value = "white"
+    )
+
+# Provinces
+
+map <- peru_prov %>% 
+  left_join(
+    provinces, 
+    by = c(
+      "DEPARTAMEN" = "departamento",
+      "PROVINCIA" = "provincia"
+      )
+  )
+
+map %>%
+  filter(DEPARTAMEN != "CALLAO") %>% 
+  ggplot() +
+  geom_sf(aes(fill = perc_no_miss), size = 0.05, color = "grey40") +
+  theme_map() +
+  scale_fill_viridis(
+    labels = scales::percent,
+    option = "mako", 
+    direction = 1,
+    name = paste0("No Missing %"),
+    na.value = "white"
+    )
+```
+
+### Covid-19 deaths dataset
+
+#### Tables
+
+```{r}
+# by year
+deaths[
+  ,.(
+    no_miss = .N - sum(missing), 
+    perc_no_miss = (.N - sum(missing))/.N,
+    missing = sum(missing),
+    perc_miss = sum(missing)/.N,
+    .N 
+    ), 
+  by = year(week)
+] %>% 
+  as_tibble() %>% 
+  filter(year %in% c(2020, 2021, 2022)) %>% 
+  select(
+    Year = year,
+    `No Missing` = no_miss,
+    `%` = perc_no_miss,
+    Total = N
+    ) %>% 
+  mutate(
+    Year = as.character(Year),
+    `%` = paste0(round(`%` * 100, 1), " (%)")
+  ) %>% 
+  pander(
+    caption = "Completeness (1a) by year - Covid-19 deaths dataset",
+    justify = c('left', 'right', 'right', 'right'),
+    big.mark = ','
+    )
+
+# by region
+deaths[
+  ,.(
+    no_miss = .N - sum(missing), 
+    perc_no_miss = (.N - sum(missing))/.N,
+    missing = sum(missing),
+    perc_miss = sum(missing)/.N,
+    .N 
+    ), 
+  by = departamento
+][order(departamento)] %>% 
+  as_tibble() %>% 
+  select(
+    Region = departamento,
+    `No Missing` = no_miss,
+    `%` = perc_no_miss,
+    Total = N
+    ) %>% 
+  mutate(
+    Region = str_to_title(Region),
+    `%` = paste0(round(`%` * 100, 1), " (%)")
+  ) %>% 
+  pander(
+    caption = "Completeness (1a) by Region - PCR dataset",
+    justify = c('left', 'right', 'right', 'right'),
+    big.mark = ','
+    )
+
+# by sex
+deaths[
+  ,.(
+    no_miss = .N - sum(missing), 
+    perc_no_miss = (.N - sum(missing))/.N,
+    missing = sum(missing),
+    perc_miss = sum(missing)/.N,
+    .N 
+    ), 
+  by = sexo
+] %>% 
+  as_tibble() %>% 
+  filter(sexo != "") %>% 
+  select(
+    Sex = sexo,
+    `No Missing` = no_miss,
+    `%` = perc_no_miss,
+    Total = N
+    ) %>% 
+  mutate(
+    Sex = str_to_title(Sex),
+    `%` = paste0(round(`%` * 100, 1), " (%)")
+  ) %>% 
+  pander(
+    caption = "Completeness (1a) by sex - Positives dataset",
+    justify = c('left', 'right', 'right', 'right'),
+    big.mark = ','
+    )
+
+```
+
+#### Plots & Maps
+
+```{r}
+#| fig-cap: 
+#| - "Indicator 1a - weekly (Covid-19 deaths dataset)"
+#| - "Indicator 1a - weekly by age group (Covid-19 deaths dataset)"
+
+# Time series
+ts <- deaths[
+  ,.(no_miss = .N - sum(missing), 
+    perc_no_miss = (.N - sum(missing))/.N,
+     perc_miss = sum(missing)/.N),
+  by = week
+]
+
+ts %>% 
+  filter(week >= "2020-03-10") %>% 
+  ggplot(aes(x = week)) + 
+  geom_line(aes(y = perc_no_miss)) +
+  labs(
+    y = "Percentage of no missing",
+    x = "Date") +
+  scale_y_continuous(labels = scales::percent) +
+  theme_bw() 
+
+# Time series by age group
+ts_by <- deaths[
+  ,.(no_miss = .N - sum(missing), 
+    perc_no_miss = (.N - sum(missing))/.N,
+     perc_miss = sum(missing)/.N),
+  by = .(week, ifelse(age_group == "75+","75+", "Less 75"))
+]
+
+ts_by %>% 
+  rename(`Age group` = ifelse) %>% 
+  filter(week >= "2020-03-10") %>% 
+  ggplot(aes(x = week, col = `Age group`)) + 
+  geom_line(aes(y = perc_no_miss)) +
+  labs(
+    y = "Percentage of no missing",
+    x = "Date") +
+  scale_y_continuous(labels = scales::percent) +
+  theme_bw() +
+  theme(legend.position = "bottom") 
+```
+
+```{r}
+#| fig-cap: 
+#| - "Map of Indicator 1a at region level - (Covid-19 deaths dataset)"
+#| - "Map of Indicator 1a at province level - (Covid-19 deaths dataset)"
+
+
+# Maps
+
+departments <- deaths[
+  ,.(no_miss = .N - sum(missing), 
+    perc_no_miss = (.N - sum(missing))/.N
+    ),
+  by = departamento
+]
+
+provinces <- deaths[
+  ,.(no_miss = .N - sum(missing), 
+    perc_no_miss = (.N - sum(missing))/.N
+    ),
+  by = .(departamento, provincia)
+]
+
+# Regions
+
+map <- peru_dep %>% 
+  left_join(
+    departments, 
+    by = c("DEPARTAMEN" = "departamento")
+    )
+
+
+map %>% 
+  ggplot() +
+  geom_sf(aes(fill = perc_no_miss), size = 0.05, color = "grey40") +
+  theme_map() +
+  scale_fill_viridis(
+    labels = scales::percent,
+    option = "mako", 
+    direction = 1,
+    name = paste0("No Missing %"),
+    na.value = "white"
+    )
+
+# Provinces
+
+map <- peru_prov %>% 
+  left_join(
+    provinces, 
+    by = c(
+      "DEPARTAMEN" = "departamento",
+      "PROVINCIA" = "provincia"
+      )
+  )
+
+map %>%
+  ggplot() +
+  geom_sf(aes(fill = perc_no_miss), size = 0.05, color = "grey40") +
+  theme_map() +
+  scale_fill_viridis(
+    labels = scales::percent,
+    option = "mako", 
+    direction = 1,
+    name = paste0("No Missing %"),
+    na.value = "white"
+    )
+```
+
+# Attribute 2. Validity
+
+## Indicator 2b
+
++--------+------------------------------------------------------------------------------------------------+------------------------------------------------------------------------------------------------------------------------------+-----------------+----------------+
+| **\#** | **Indicator definition**                                                                       | **Numerator and denominator**                                                                                                | **Data source** | **Levels**     |
++========+================================================================================================+==============================================================================================================================+=================+================+
+| 2b     | Proportion of inconsistencies and errors within a dataset (inconsistent dates or out of range) | **Numerator:** total cases with dates out of the range of the pandemic (less than "March 2020" or greater than dataset date) | \- PCR          | \- Sex         |
+|        |                                                                                                |                                                                                                                              |                 |                |
+|        |                                                                                                | **Denominator:** total cases in the datset                                                                                   |                 | \- Institution |
++--------+------------------------------------------------------------------------------------------------+------------------------------------------------------------------------------------------------------------------------------+-----------------+----------------+
+
+: {tbl-colwidths="\[5,30,30, 17.5, 17.5\]"}
+
+### Molecular (PCR tests) dataset
+
+```{r}
+# by sex
+molecular[
+  , wrong_date := week < "2020-03-01" | week >= "2022-08-01"
+][
+  ,.(
+    wrong_date = sum(wrong_date), 
+    wrong_date_perc = sum(wrong_date)/.N,
+    .N 
+    ), 
+  by = sexo
+] %>% 
+  as_tibble() %>% 
+  select(
+    Sex = sexo,
+    `Wrong dates` = wrong_date,
+    `%` = wrong_date_perc,
+    Total = N
+    ) %>% 
+  mutate(
+    Sex = str_to_title(Sex),
+    `%` = paste0(round(`%` * 100, 3), " (%)")
+  ) %>% 
+  pander(
+    caption = "Validity (2a) by institution - PCR dataset",
+    justify = c('left', 'right', 'right', 'right'),
+    big.mark = ','
+    )
+
+# by institution
+molecular[
+  , wrong_date := week < "2020-03-01" | week >= "2022-08-01"
+][
+  ,.(
+    wrong_date = sum(wrong_date), 
+    wrong_date_perc = sum(wrong_date)/.N,
+    .N 
+    ), 
+  by = institucion
+] %>% 
+  as_tibble() %>% 
+  select(
+    Institution = institucion,
+    `Wrong dates` = wrong_date,
+    `%` = wrong_date_perc,
+    Total = N
+    ) %>% 
+  mutate(
+    Institution = str_to_title(Institution),
+    `%` = paste0(round(`%` * 100, 3), " (%)")
+  ) %>% 
+  pander(
+    caption = "Validity (2a) by institution - PCR dataset",
+    justify = c('left', 'right', 'right', 'right'),
+    big.mark = ','
+    )
+
+```
+
+# Attribute 3. Concordance
+
+## Indicator 3a
+
++--------+--------------------------------------------------------------------------------------------------+----------------------------------------------------------------------+-----------------+------------+
+| **\#** | **Indicator definition**                                                                         | **Numerator and denominator**                                        | **Data source** | **Levels** |
++========+==================================================================================================+======================================================================+=================+============+
+| 3a     | **PCR testing results concordance**                                                              | **Numerator:** Number of positive PCR results in PCR dataset         | \- PCR          | \- Year    |
+|        |                                                                                                  |                                                                      |                 |            |
+|        | Refers to the proportion of concordance in positive PCR tests between two different data sources | **Denominator:** Number of positive PCR results in Positives dataset | \- Positives    | \- Sex     |
+|        |                                                                                                  |                                                                      |                 |            |
+|        |                                                                                                  |                                                                      |                 | \- Region  |
++--------+--------------------------------------------------------------------------------------------------+----------------------------------------------------------------------+-----------------+------------+
+
+: {tbl-colwidths="\[5,30,30, 17.5, 17.5\]"}
+
+```{r}
+# Filtering the datasets
+molecular_conc <- molecular %>%
+  filter(
+    resultado == "POSITIVO",
+    week > "2020-03-01",
+    week < "2022-04-22"
+    )
+
+positives_conc <- positives %>% 
+  mutate(week = week - 3) %>% 
+  filter(
+    metododx == "PCR",
+    week > "2020-03-01",
+    week < "2022-04-22"
+    ) 
+
+# By year
+year_molecular <- molecular_conc %>% 
+  group_by(year = year(week)) %>% 
+  count(name = "pcr")
+
+year_positive <- positives_conc %>% 
+  group_by(year = year(week)) %>% 
+  count(name = "pos")
+
+year_molecular %>% 
+  left_join(year_positive, by = "year") %>% 
+  mutate(
+    `Concordance ratio` = pcr / pos,
+    year = as.character(year)
+    ) %>% 
+  rename(
+    Year = year,
+    `PCR dataset` = pcr,
+    `Positive dataset` = pos
+  ) %>% 
+  pander(
+    caption = "Concordance (3a) by year",
+    justify = c('left', 'right', 'right', 'right'),
+    big.mark = ','
+    )
+
+# By region
+dep_molecular <- molecular_conc %>% 
+  group_by(departamento = departamento_muestra) %>% 
+  count(name = "pcr")
+
+dep_positive <- positives_conc %>% 
+  group_by(departamento) %>% 
+  count(name = "pos")
+
+dep_molecular %>% 
+  left_join(dep_positive, by = "departamento") %>% 
+  mutate(`Concordance ratio` = pcr / pos) %>% 
+  rename(
+    Region = departamento,
+    `PCR dataset` = pcr,
+    `Positive dataset` = pos
+  ) %>% 
+  pander(
+    caption = "Concordance (3a) by region",
+    justify = c('left', 'right', 'right', 'right'),
+    big.mark = ','
+    )
+
+```
+
+```{r}
+#| fig-cap: 
+#| - "Indicator 3a - weekly concordance time series"
+# Time series -------------------------------------------------------------
+
+ts_molecular <- molecular_conc %>% 
+  group_by(week) %>% 
+  count(name = "PCR")
+
+ts_positives <- positives_conc %>% 
+  group_by(week) %>% 
+  count(name = "Positives")
+
+ggplot() +
+  geom_line(data = ts_molecular, aes(x = week, y = PCR), col = "red") +
+  geom_line(data = ts_positives, aes(x = week, y = Positives), col = "blue") +
+  labs(
+    y = "Number of positive tests",
+    x = "Date"
+  ) +
+  scale_y_continuous(labels = scales::comma) +
+  theme_bw()
+```
+
+```{r}
+#| fig-cap: 
+#| - "Map of Indicator 3a at province level"
+# By region
+prov_molecular <- molecular_conc %>% 
+  group_by(
+    departamento = departamento_muestra,
+    provincia = provincia_muestra
+    ) %>% 
+  count(name = "pcr")
+
+prov_positive <- positives_conc %>% 
+  group_by(departamento, provincia) %>% 
+  count(name = "pos")
+
+prov_map <- prov_molecular %>% 
+  left_join(prov_positive) %>% 
+  mutate(concordance = pcr / pos)
+
+
+# Provinces
+
+map <- peru_prov %>% 
+  left_join(
+    prov_map, 
+    by = c(
+      "DEPARTAMEN" = "departamento",
+      "PROVINCIA" = "provincia"
+      )
+  )
+
+map %>%
+  filter(PROVINCIA != "ATALAYA") %>% 
+  ggplot() +
+  geom_sf(aes(fill = concordance), size = 0.05, color = "grey40") +
+  theme_map() +
+  scale_fill_viridis_b(
+    direction = -1,
+    name = paste0("Concordance\nratio"),
+    na.value = "white"
+    )
+
+```
+
+# Attribute 4. Timeliness
+
+## Indicator 3a
+
++--------+--------------------------------------------------------------------------------------------------+-------------------------------------------------------------------------------+--------------------+------------+
+| **\#** | **Indicator definition**                                                                         | **Numerator and denominator**                                                 | **Data source**    | **Levels** |
++========+==================================================================================================+===============================================================================+====================+============+
+| 4a     | **Main time delays**                                                                             | **Delay to report:** date of report (call) - date of onset (date of symptoms) | \- Positives       | \- Year    |
+|        |                                                                                                  |                                                                               |                    |            |
+|        | Refers to the proportion of concordance in positive PCR tests between two different data sources | **Delay to lab result:** date of lab result - date of onset of symptoms       | \- Triage          | \- Sex     |
+|        |                                                                                                  |                                                                               |                    |            |
+|        |                                                                                                  | **Delay to attention:** date of attention - date of onset of symptoms         | \- Hospitalization | \- Region  |
++--------+--------------------------------------------------------------------------------------------------+-------------------------------------------------------------------------------+--------------------+------------+
+
+: {tbl-colwidths="\[5,30,30, 17.5, 17.5\]"}
+
+```{r}
+# Suspected - Positive
+sus_pos <- suspected %>% 
+  left_join(positives, by = "id_persona") %>% 
+  select(id_persona, departamento, provincia, distrito, fecha_contacto, edad,
+         sexo, fecha_sintomas, fecha_resultado, flag_sospechoso, metododx) %>% 
+  filter(!is.na(fecha_resultado)) %>% 
+  mutate(
+    valid = as.numeric(fecha_resultado) <= (as.numeric(fecha_sintomas) + 30) &
+         as.numeric(fecha_resultado) >= (as.numeric(fecha_sintomas) - 10)
+  ) %>%
+  filter(valid) %>%
+  mutate(
+    timediff_res_sympt = as.numeric(
+      difftime(fecha_resultado, fecha_sintomas, units = "days")
+      ),
+    timediff_sympt_cont = as.numeric(
+      difftime(fecha_contacto, fecha_sintomas, units = "days")
+    )
+  )
+
+sus_pos_dpto <- sus_pos %>% 
+  group_by(departamento) %>% 
+  summarise(
+    timediff_res_sympt_mean = round(mean(timediff_res_sympt, na.rm = TRUE),1), 
+    timediff_sympt_cont_mean = round(mean(timediff_sympt_cont, na.rm = TRUE),1),
+    )
+
+sus_pos_dpto %>% 
+  select(
+    Region = departamento,
+    `Delay to lab result` = timediff_res_sympt_mean,
+    `Delay to report` = timediff_sympt_cont_mean
+  ) %>% 
+  pander(
+    caption = "Main time delays (4a) by Region in average days",
+    justify = c('left', 'right', 'right'),
+    big.mark = ','
+    )
+  
+
+sus_pos_prov <- sus_pos %>% 
+  group_by(departamento,  provincia) %>% 
+  summarise(
+    timediff_res_sympt_mean = mean(timediff_res_sympt, na.rm = TRUE), 
+    timediff_sympt_cont_mean = mean(timediff_sympt_cont, na.rm = TRUE),
+  )
+
+sus_pos_date <- sus_pos %>% 
+  group_by(
+    fecha_sintomas = floor_date(fecha_sintomas, unit = "weeks", week_start = 1)
+    ) %>% 
+  summarise(
+    timediff_res_sympt_mean = mean(timediff_res_sympt, na.rm = TRUE), 
+    timediff_sympt_cont_mean = mean(timediff_sympt_cont, na.rm = TRUE),
+  ) 
+
+sus_pos %>% 
+  group_by(year = year(fecha_sintomas)) %>% 
+  summarise(
+    timediff_res_sympt_mean = round(mean(timediff_res_sympt, na.rm = TRUE),2), 
+    timediff_sympt_cont_mean = round(mean(timediff_sympt_cont, na.rm = TRUE),2),
+  ) %>% 
+  mutate(year = as.character(year)) %>% 
+  select(
+    Year = year,
+    `Delay to lab result` = timediff_res_sympt_mean,
+    `Delay to report` = timediff_sympt_cont_mean
+  ) %>% 
+  pander(
+    caption = "Main time delays (4a) by year in average days",
+    justify = c('left', 'right', 'right'),
+    big.mark = ','
+    )
+
+sus_pos_dx <- sus_pos %>% 
+  group_by(
+    fecha_sintomas = floor_date(fecha_sintomas, unit = "weeks", week_start = 1),
+    metododx
+  ) %>% 
+  summarise(
+    timediff_res_sympt_mean = mean(timediff_res_sympt, na.rm = TRUE), 
+    timediff_sympt_cont_mean = mean(timediff_sympt_cont, na.rm = TRUE),
+  )
+
+
+
+```
+
+```{r}
+# Suspected - Hospital
+
+sus_hos <- suspected %>% 
+  left_join(hospital, by = "id_persona") %>% 
+  select(id_persona, dep_domicilio, prov_domicilio, dist_domicilio,
+         fecha_contacto, edad, sexo, fecha_sintomas, fecha_ingreso_hosp) %>% 
+  filter(!is.na(fecha_ingreso_hosp)) %>% 
+  mutate(
+    valid = as.numeric(fecha_ingreso_hosp) <= (as.numeric(fecha_sintomas) + 60) &
+      as.numeric(fecha_ingreso_hosp) >= (as.numeric(fecha_sintomas) - 60)
+  ) %>%
+  filter(valid, !is.na(fecha_sintomas)) %>%
+  mutate(
+    timediff = as.numeric(
+      difftime(fecha_ingreso_hosp,fecha_sintomas, units = "days")
+      )
+  )
+
+sus_hos_dpto <- sus_hos %>% 
+  group_by(dep_domicilio) %>% 
+  summarise(
+    timediff_mean = round(mean(timediff, na.rm = TRUE),1), 
+    timediff_median = round(median(timediff, na.rm = TRUE),2)
+  )
+
+sus_hos_dpto %>% 
+  select(
+    Region = dep_domicilio,
+    `Delay to attention` = timediff_mean
+  ) %>% 
+  pander(
+    caption = "Main time delays (4a) by Region in average days",
+    justify = c('left', 'right'),
+    big.mark = ','
+    )
+
+sus_hos_prov <- sus_hos %>% 
+  group_by(dep_domicilio, prov_domicilio) %>% 
+  summarise(
+    timediff_mean = mean(timediff, na.rm = TRUE), 
+    timediff_median = median(timediff, na.rm = TRUE)
+  )
+
+sus_hos_sintomas <- sus_hos %>% 
+  group_by(fecha_sintomas) %>% 
+  summarise(
+    timediff_mean = mean(timediff, na.rm = TRUE), 
+    timediff_median = median(timediff, na.rm = TRUE)
+  )
+
+sus_hos %>% 
+  group_by(year = year(fecha_sintomas)) %>% 
+  summarise(
+    timediff_mean = round(mean(timediff, na.rm = TRUE),2), 
+    timediff_median = median(timediff, na.rm = TRUE)
+  ) %>% 
+  mutate(year = as.character(year)) %>% 
+  select(
+    Year = year,
+    `Delay to attention` = timediff_mean
+  ) %>% 
+  pander(
+    caption = "Main time delays (4a) by year in average days",
+    justify = c('left', 'right'),
+    big.mark = ','
+    )
+```
+
+```{r}
+#| fig-cap: 
+#| - "Timeliness indicators (4a)"
+#| - "Timeliness indicators (4a) by diagnostic method"
+
+(sus_pos_date %>% 
+  pivot_longer(cols = 2:3) %>% 
+  filter(year(fecha_sintomas) >= 2020) %>% 
+  ggplot(aes(x = fecha_sintomas, y = value, col = name)) +
+  geom_line() +
+  ylim(0, 30) +
+  theme_bw() +
+  theme(legend.position = "bottom") +
+  scale_color_manual(
+    name = "Indicator", 
+    values = c(
+      "timediff_res_sympt_mean" = "blue",
+      "timediff_sympt_cont_mean" = "red"
+      ),
+    labels = c("Delay to lab results", "Delay to report")
+    ) +
+  labs(
+    x = "Date of onset (symptoms)", 
+    y = "Time (in days)"
+    )
+) 
+
+
+(sus_pos_dx %>% 
+   pivot_longer(cols = 3:4) %>% 
+   filter(year(fecha_sintomas) >= 2020) %>% 
+   ggplot(aes(x = fecha_sintomas, y = value, col = name)) +
+   facet_grid(metododx ~ .) +
+   geom_line() +
+   ylim(0, 20) +
+   theme_bw() +
+  theme(legend.position = "bottom") +
+   scale_color_manual(
+     name = "Indicator", 
+     values = c(
+       "timediff_res_sympt_mean" = "blue",
+       "timediff_sympt_cont_mean" = "red"
+     ),
+     labels = c("Delay to lab results", "Delay to report")
+   ) +
+   labs(
+     x = "Date of onset (symptoms)", 
+     y = "Time (in days)"
+   )
+)
+```
+
+```{r}
+#| fig-cap: 
+#| - "Spatial distribution (Region) of timeliness indicators - Delay to lab result"
+#| - "Spatial distribution (Region) of timeliness indicators - Delay to report"
+#| - "Spatial distribution (Province) of timeliness indicators - Delay to lab result"
+#| - "Spatial distribution (Province) of timeliness indicators - Delay to report"
+
+map <- peru_dep %>% 
+  left_join(sus_pos_dpto, by = c("DEPARTAMEN" = "departamento"))
+
+(map %>%
+  ggplot() +
+  geom_sf(aes(fill = timediff_res_sympt_mean), size = 0.05, color = "grey40") +
+  theme_map() +
+  scale_fill_viridis(
+    option = "mako", 
+    direction = -1,
+    name = "Time\n(in days)",
+    na.value = "white"
+  )
+)
+
+(map %>%
+  ggplot() +
+  geom_sf(aes(fill = timediff_sympt_cont_mean), size = 0.05, color = "grey40") +
+  theme_map() +
+  scale_fill_viridis(
+    option = "mako", 
+    direction = -1,
+    name = "Time\n(in days)",
+    na.value = "white",
+  )
+)
+
+map <- peru_prov %>% 
+  left_join(
+    sus_pos_prov, 
+    by = c(
+      "DEPARTAMEN" = "departamento",
+      "PROVINCIA" = "provincia"
+    )
+  )
+
+(map %>%
+    ggplot() +
+    geom_sf(aes(fill = timediff_res_sympt_mean), size = 0.05, color = "grey40") +
+    theme_map() +
+    scale_fill_viridis(
+      option = "mako", 
+      direction = -1,
+      name = "Time\n(in days)",
+      na.value = "white"
+    )
+) 
+
+(map %>%
+    ggplot() +
+    geom_sf(aes(fill = timediff_sympt_cont_mean), size = 0.05, color = "grey40") +
+    theme_map() +
+    scale_fill_viridis(
+      option = "mako", 
+      direction = -1,
+      name = "Time\n(in days)",
+      na.value = "white",
+    )
+) 
+```

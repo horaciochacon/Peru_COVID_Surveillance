@@ -1,0 +1,122 @@
+---
+title: "INSIGHT - PERU"
+output: 
+  flexdashboard::flex_dashboard:
+    theme: flatly
+    orientation: rows
+runtime: shiny
+---
+
+```{r setup, include=FALSE}
+library(flexdashboard)
+library(shiny)
+library(shinyWidgets)
+library(data.table)
+library(leaflet)
+library(janitor)
+library(DT)
+source("../R/functions_afc.R")
+source("../R/functions.R")
+options(shiny.maxRequestSize=3000*1024^2)
+
+departamento <- geojsonio::geojson_read(
+  "../data/geoJSON/peru_departamental_simple.geojson", 
+  what = "sp"
+  )
+
+# positives <- fread("../data/positivos_covid.csv") %>% clean_names()
+
+# summarized_p <- summary_dataset(positives)
+
+
+```
+
+Completeness
+=====================================
+
+Inputs {.sidebar data-width=370}
+-----------------------------------------------------------------------
+
+### Configuration
+
+```{r}
+fileInput(
+    'file1', 
+    'Choose CSV File',
+    accept = c(
+      'text/csv',
+      'text/comma-separated-values,text/plain',
+      '.csv'
+    )
+)
+
+```
+
+
+
+Column {.tabset}
+-----------------------------------------------------------------------
+
+### Dataset
+
+```{r}
+
+output$dataset <- DT::renderDataTable({
+  
+  inFile <- input$file1
+  
+  if (is.null(inFile)) {return(NULL)}
+  
+  fread(inFile$datapath) %>% data_table()
+})
+
+
+dataTableOutput("dataset")
+```
+
+
+### Summary
+
+```{r}
+output$positives_sum <- DT::renderDataTable({
+  
+  inFile <- input$file1
+  
+  if (is.null(inFile)) {return(NULL)}
+  
+  fread(inFile$datapath) %>%
+    summary_dataset() %>% 
+    data_table()
+  
+})
+
+dataTableOutput("positives_sum")
+```
+
+### Summary by Department
+
+```{r}
+output$positives_sum <- DT::renderDataTable({
+  
+  inFile <- input$file1
+  
+  if (is.null(inFile)) {return(NULL)}
+  
+  fread(inFile$datapath) %>%
+    summary_dataset() %>% 
+    data_table()
+  
+})
+
+dataTableOutput("positives_sum")
+```
+
+###  Maps
+
+```{r}
+leaflet(departamento) %>% 
+  addTiles()
+```
+
+Validity
+=====================================
