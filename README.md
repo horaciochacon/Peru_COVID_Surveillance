@@ -1,15 +1,11 @@
-# COVID-19 Surveillance System Performance: A Secondary Data Source Analysis
 
+# COVID-19 Surveillance System Performance: A Secondary Data Source Analysis
 
 [![DOI](https://zenodo.org/badge/772271662.svg)](https://zenodo.org/doi/10.5281/zenodo.10819647)
 
-This repository contains the code used for analyzing secondary data sources related to COVID-19 surveillance in Peru.
-Using CDC's [Guidelines for Evaluating Surveillance Systems](https://www.cdc.gov/mmwr/preview/mmwrhtml/00001769.htm) framework, the analysis covers various indicators such as data completeness, validity, concordance, and timeliness.
+This repository contains the code used for analyzing secondary data sources related to COVID-19 surveillance in Peru. Using CDC's [Guidelines for Evaluating Surveillance Systems](https://www.cdc.gov/mmwr/preview/mmwrhtml/00001769.htm) framework, the analysis covers various indicators such as data completeness, validity, concordance, and timeliness.
 
 ## Data Sources
-
-Datasets are available on the Peruvian [Open Data Portal](https://www.datosabiertos.gob.pe/).
-They have not being included in the current repository due to file size.
 
 | Dataset                                                                                                                                      | Institution | Source of the information            | Granularity level            |
 |-------------|-------------|---------------------|-------------|
