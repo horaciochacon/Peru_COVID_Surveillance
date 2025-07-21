@@ -62,6 +62,18 @@ cat("=== ATTRIBUTE 1: COMPLETENESS ANALYSIS ===\n\n")
 # -----------------------------------------------------------------------------
 cat("1.1 Analyzing Molecular (PCR) dataset...\n")
 
+# Total
+molecular[
+  ,.(
+    no_miss = .N - sum(missing), 
+    perc_no_miss = (.N - sum(missing))/.N,
+    missing = sum(missing),
+    perc_miss = sum(missing)/.N,
+    .N 
+  ) 
+] %>% 
+  as_tibble() 
+
 # By year
 molecular_year <- molecular[
   ,.(
@@ -223,6 +235,18 @@ print(p4)
 # -----------------------------------------------------------------------------
 cat("\n1.2 Analyzing Positives dataset...\n")
 
+# Total
+ positives[
+  ,.(
+    no_miss = .N - sum(missing), 
+    perc_no_miss = (.N - sum(missing))/.N,
+    missing = sum(missing),
+    perc_miss = sum(missing)/.N,
+    .N 
+  ) 
+] %>% 
+  as_tibble()
+
 # By year
 positives_year <- positives[
   ,.(
@@ -247,6 +271,18 @@ print(positives_year)
 # 1.3 COVID-19 deaths dataset
 # -----------------------------------------------------------------------------
 cat("\n1.3 Analyzing COVID-19 deaths dataset...\n")
+
+# Total
+ deaths[
+  ,.(
+    no_miss = .N - sum(missing), 
+    perc_no_miss = (.N - sum(missing))/.N,
+    missing = sum(missing),
+    perc_miss = sum(missing)/.N,
+    .N 
+  ) 
+] %>% 
+  as_tibble() 
 
 # By year
 deaths_year <- deaths[
@@ -299,6 +335,34 @@ molecular_validity_inst <- molecular[
 
 cat("\nValidity by institution - PCR dataset:\n")
 print(molecular_validity_inst)
+
+# Validity check for positives dataset (total only)
+positives_validity_total <- positives[
+  , wrong_date := week < "2020-03-01" | week >= "2022-08-01"
+][
+  ,.(
+    wrong_date = sum(wrong_date), 
+    wrong_date_perc = sum(wrong_date)/.N,
+    .N 
+  )
+]
+
+cat("\nValidity (total) - Positives dataset:\n")
+print(positives_validity_total)
+
+# Validity check for deaths dataset (total only)
+deaths_validity_total <- deaths[
+  , wrong_date := week < "2020-03-01" | week >= "2022-08-01"
+][
+  ,.(
+    wrong_date = sum(wrong_date), 
+    wrong_date_perc = sum(wrong_date)/.N,
+    .N 
+  )
+]
+
+cat("\nValidity (total) - Deaths dataset:\n")
+print(deaths_validity_total)
 
 # =============================================================================
 # ATTRIBUTE 3: CONCORDANCE (Indicator 3a)
