@@ -21,5 +21,5 @@ To run the analysis locally, follow these steps:
 
 -   Clone the repository: git clone <https://github.com/your-repo/covid-19-surveillance-analysis.git>
 -   Open the RStudio project file `Peru_COVID_Surveillance.Rproj`.
--   Install the required R packages by running `renv::restore()` in the R console.
+-   Install the required R packages (data.table, tidyverse, sf, scales, lubridate, cowplot, AMR, viridis, pander, janitor).
 -   Open the `Report.qmd` file and follow the instructions to run the analysis.
