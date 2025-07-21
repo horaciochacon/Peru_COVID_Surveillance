@@ -17,6 +17,7 @@ library(cowplot)
 library(AMR)
 library(viridis)
 library(pander)
+library(Hmisc)  # For Harrell-Davis median estimator
 
 # Configuration ---------------------------------------------------------------
 # Set save = TRUE to save plots to files, FALSE to just display them
@@ -35,6 +36,13 @@ missing_field <- function(x) {
 
 miss <- function(x) {
   is.na(max(x))
+}
+
+# Harrell-Davis median estimator for robust estimation with right-skewed data
+hd_median <- function(x) {
+  x <- x[!is.na(x)]
+  if (length(x) == 0) return(NA)
+  hdquantile(x, probs = 0.5)
 }
 
 # Load processed data ---------------------------------------------------------
@@ -444,8 +452,8 @@ sus_pos <- suspected %>%
   filter(
     fecha_sintomas <= fecha_resultado & 
       fecha_resultado  <= fecha_sintomas + 30 &
-      fecha_contacto >= fecha_sintomas &
-      fecha_sintomas + 30 >= fecha_contacto
+      fecha_sintomas <= fecha_contacto &
+      fecha_contacto <= fecha_sintomas + 30
   ) %>% 
   select(id_persona, departamento, provincia, distrito, fecha_contacto, edad,
          sexo, fecha_sintomas, fecha_resultado, flag_sospechoso, metododx) %>%
@@ -459,14 +467,33 @@ sus_pos <- suspected %>%
     )
   )
 
+# Total (overall) timeliness metrics
+sus_pos_total <- sus_pos %>%
+  summarise(
+    n = n(),
+    timediff_res_sympt_mean = round(mean(timediff_res_sympt, na.rm = TRUE), 1),
+    timediff_res_sympt_median = round(median(timediff_res_sympt, na.rm = TRUE), 1),
+    timediff_res_sympt_hd_median = round(hd_median(timediff_res_sympt), 1),
+    timediff_sympt_cont_mean = round(mean(timediff_sympt_cont, na.rm = TRUE), 1),
+    timediff_sympt_cont_median = round(median(timediff_sympt_cont, na.rm = TRUE), 1),
+    timediff_sympt_cont_hd_median = round(hd_median(timediff_sympt_cont), 1)
+  )
+
+cat("Overall timeliness indicators:\n")
+cat("  - Total matched records: ", sus_pos_total$n, "\n", sep="")
+cat("  - Delay to lab result (HD median): ", sus_pos_total$timediff_res_sympt_hd_median, " days\n", sep="")
+cat("  - Delay to report (HD median): ", sus_pos_total$timediff_sympt_cont_hd_median, " days\n\n", sep="")
+
 # By department
 sus_pos_dpto <- sus_pos %>% 
   group_by(departamento) %>% 
   summarise(
     timediff_res_sympt_mean = round(mean(timediff_res_sympt, na.rm = TRUE),1), 
     timediff_res_sympt_median = round(median(timediff_res_sympt, na.rm = TRUE),1),
+    timediff_res_sympt_hd_median = round(hd_median(timediff_res_sympt),1),
     timediff_sympt_cont_mean = round(mean(timediff_sympt_cont, na.rm = TRUE),1),
     timediff_sympt_cont_median = round(median(timediff_sympt_cont, na.rm = TRUE),1),
+    timediff_sympt_cont_hd_median = round(hd_median(timediff_sympt_cont),1),
   )
 
 cat("Main time delays by Region (median days):\n")
@@ -478,8 +505,10 @@ timeliness_year <- sus_pos %>%
   summarise(
     timediff_res_sympt_mean = round(mean(timediff_res_sympt, na.rm = TRUE),1), 
     timediff_res_sympt_median = round(median(timediff_res_sympt, na.rm = TRUE),1),
+    timediff_res_sympt_hd_median = round(hd_median(timediff_res_sympt),1),
     timediff_sympt_cont_mean = round(mean(timediff_sympt_cont, na.rm = TRUE),1),
     timediff_sympt_cont_median = round(median(timediff_sympt_cont, na.rm = TRUE),1),
+    timediff_sympt_cont_hd_median = round(hd_median(timediff_sympt_cont),1),
   )
 
 cat("\nMain time delays by year (median days):\n")
@@ -493,12 +522,17 @@ sus_pos_date <- sus_pos %>%
   summarise(
     timediff_res_sympt_mean = round(mean(timediff_res_sympt, na.rm = TRUE),1), 
     timediff_res_sympt_median = round(median(timediff_res_sympt, na.rm = TRUE),1),
+    timediff_res_sympt_hd_median = round(hd_median(timediff_res_sympt),1),
     timediff_sympt_cont_mean = round(mean(timediff_sympt_cont, na.rm = TRUE),1),
     timediff_sympt_cont_median = round(median(timediff_sympt_cont, na.rm = TRUE),1),
+    timediff_sympt_cont_hd_median = round(hd_median(timediff_sympt_cont),1),
   )
 
 p6 <- sus_pos_date %>% 
-  pivot_longer(cols = 2:3) %>% 
+  select(fecha_sintomas, 
+         timediff_res_sympt_mean, timediff_res_sympt_hd_median,
+         timediff_sympt_cont_mean, timediff_sympt_cont_hd_median) %>%
+  pivot_longer(cols = 2:5) %>% 
   filter(year(fecha_sintomas) >= 2020) %>% 
   ggplot(aes(x = fecha_sintomas, y = value, col = name)) +
   geom_line() +
@@ -509,12 +543,19 @@ p6 <- sus_pos_date %>%
     name = "Indicator", 
     values = c(
       "timediff_res_sympt_mean" = "blue",
-      "timediff_sympt_cont_mean" = "red"
+      "timediff_res_sympt_hd_median" = "darkblue",
+      "timediff_sympt_cont_mean" = "red",
+      "timediff_sympt_cont_hd_median" = "darkred"
     ),
-    labels = c("Delay to lab results", "Delay to report")
+    labels = c(
+      "Delay to lab results (mean)",
+      "Delay to lab results (HD median)",
+      "Delay to report (mean)",
+      "Delay to report (HD median)"
+    )
   ) +
   labs(
-    title = "Timeliness indicators (4a) delay to lab results and to report",
+    title = "Timeliness indicators (4a) - Arithmetic mean and Harrell-Davis median",
     x = "Date of onset (symptoms)", 
     y = "Time (in days)"
   )
